@@ -3,6 +3,9 @@ Qt WASM and Next.js integration example
 
 This repository contains an example Qt/WASM project embedded in a Next.js application.
 
+**This repo was created to illustrate the Qt/WASM integration problem with the Next.js application. Once we find the solution, I'll update the repo and write a blog post about this very subject. I already spent countless hours trying to figure this out, now it's time to ask for help.**
+
+
 ### Requirements
 
 * [Qt 5.15](https://www.qt.io/)
@@ -102,6 +105,14 @@ Run it:
 And open a browser at the specified URL. The app crashed 😧.
 
 ![nextjs-error](doc/nextjs-error.png)
+
+```
+exception thrown: TypeError: handle is undefined,__emval_get_property@webpack-internal:///./pages/MyApp.js:912:1085
+QWasmString::toQString(emscripten::val const&)@http://localhost:8000/_next/static/94c486d8c8725ebf2f964854fb22d0f4.wasm
+QWasmScreen::canvasId() const@http://localhost:8000/_next/static/94c486d8c8725ebf2f964854fb22d0f4.wasm
+```
+
+ The Qt/WASM application is calling back the `stringToUTF16` function of the Emscripten runtime, but the `handle` returned by [AnalogClock.js#L5894](https://github.com/jpgehrig/nextqt/blob/master/nextjs/components/AnalogClock.js#L5894) is undefined.
 
 
 ## Wanna help?
