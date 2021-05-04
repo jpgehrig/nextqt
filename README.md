@@ -118,4 +118,3 @@ QWasmScreen::canvasId() const@http://localhost:8000/_next/static/94c486d8c8725eb
 ## Wanna help?
 
 * There is a [question on StackOverflow](https://stackoverflow.com/questions/67315001/qt-web-assembly-application-and-next-js-handle-is-undefined) about this.
-* There a [job posting on upwork.com](https://www.upwork.com/jobs/~0160f1d746e161c1cf) with a reward.
