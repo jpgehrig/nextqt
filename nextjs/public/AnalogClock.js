@@ -1,11 +1,3 @@
-
-var Module = (function() {
-  var _scriptDir = typeof document !== 'undefined' && document.currentScript ? document.currentScript.src : undefined;
-  
-  return (
-function(Module) {
-  Module = Module || {};
-
 // Copyright 2010 The Emscripten Authors.  All rights reserved.
 // Emscripten is available under two separate licenses, the MIT license and the
 // University of Illinois/NCSA Open Source License.  Both these licenses can be
@@ -52,10 +44,16 @@ var quit_ = function(status, toThrow) {
 // Determine the runtime environment we are in. You can customize this by
 // setting the ENVIRONMENT setting at compile time (see settings.js).
 
-var ENVIRONMENT_IS_WEB = true;
+var ENVIRONMENT_IS_WEB = false;
 var ENVIRONMENT_IS_WORKER = false;
 var ENVIRONMENT_IS_NODE = false;
 var ENVIRONMENT_IS_SHELL = false;
+ENVIRONMENT_IS_WEB = typeof window === 'object';
+ENVIRONMENT_IS_WORKER = typeof importScripts === 'function';
+// N.b. Electron.js environment is simultaneously a NODE-environment, but
+// also a web environment.
+ENVIRONMENT_IS_NODE = typeof process === 'object' && typeof process.versions === 'object' && typeof process.versions.node === 'string';
+ENVIRONMENT_IS_SHELL = !ENVIRONMENT_IS_WEB && !ENVIRONMENT_IS_NODE && !ENVIRONMENT_IS_WORKER;
 
 if (Module['ENVIRONMENT']) {
   throw new Error('Module.ENVIRONMENT has been deprecated. To force the environment, use the ENVIRONMENT compile-time option (for example, -s ENVIRONMENT=web or -s ENVIRONMENT=node)');
@@ -78,6 +76,104 @@ var read_,
     readBinary,
     setWindowTitle;
 
+var nodeFS;
+var nodePath;
+
+if (ENVIRONMENT_IS_NODE) {
+  if (ENVIRONMENT_IS_WORKER) {
+    scriptDirectory = require('path').dirname(scriptDirectory) + '/';
+  } else {
+    scriptDirectory = __dirname + '/';
+  }
+
+
+  read_ = function shell_read(filename, binary) {
+    if (!nodeFS) nodeFS = require('fs');
+    if (!nodePath) nodePath = require('path');
+    filename = nodePath['normalize'](filename);
+    return nodeFS['readFileSync'](filename, binary ? null : 'utf8');
+  };
+
+  readBinary = function readBinary(filename) {
+    var ret = read_(filename, true);
+    if (!ret.buffer) {
+      ret = new Uint8Array(ret);
+    }
+    assert(ret.buffer);
+    return ret;
+  };
+
+
+
+
+  if (process['argv'].length > 1) {
+    thisProgram = process['argv'][1].replace(/\\/g, '/');
+  }
+
+  arguments_ = process['argv'].slice(2);
+
+  if (typeof module !== 'undefined') {
+    module['exports'] = Module;
+  }
+
+  process['on']('uncaughtException', function(ex) {
+    // suppress ExitStatus exceptions from showing an error
+    if (!(ex instanceof ExitStatus)) {
+      throw ex;
+    }
+  });
+
+  process['on']('unhandledRejection', abort);
+
+  quit_ = function(status) {
+    process['exit'](status);
+  };
+
+  Module['inspect'] = function () { return '[Emscripten Module object]'; };
+
+
+
+} else
+if (ENVIRONMENT_IS_SHELL) {
+
+
+  if (typeof read != 'undefined') {
+    read_ = function shell_read(f) {
+      return read(f);
+    };
+  }
+
+  readBinary = function readBinary(f) {
+    var data;
+    if (typeof readbuffer === 'function') {
+      return new Uint8Array(readbuffer(f));
+    }
+    data = read(f, 'binary');
+    assert(typeof data === 'object');
+    return data;
+  };
+
+  if (typeof scriptArgs != 'undefined') {
+    arguments_ = scriptArgs;
+  } else if (typeof arguments != 'undefined') {
+    arguments_ = arguments;
+  }
+
+  if (typeof quit === 'function') {
+    quit_ = function(status) {
+      quit(status);
+    };
+  }
+
+  if (typeof print !== 'undefined') {
+    // Prefer to use print/printErr where they exist, as they usually work better.
+    if (typeof console === 'undefined') console = {};
+    console.log = print;
+    console.warn = console.error = typeof printErr !== 'undefined' ? printErr : print;
+  }
+
+
+} else
 
 // Note that this includes Node.js workers when relevant (pthreads is enabled).
 // Node.js workers are detected as a combination of ENVIRONMENT_IS_WORKER and
@@ -87,11 +183,6 @@ if (ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER) {
     scriptDirectory = self.location.href;
   } else if (document.currentScript) { // web
     scriptDirectory = document.currentScript.src;
-  }
-  // When MODULARIZE (and not _INSTANCE), this JS may be executed later, after document.currentScript
-  // is gone, so we saved it, and we use it here instead of any other info.
-  if (_scriptDir) {
-    scriptDirectory = _scriptDir;
   }
   // blob urls look like blob:http://site.com/etc/etc and we cannot infer anything from them.
   // otherwise, slice off the final part of the url to find the script directory.
@@ -103,7 +194,6 @@ if (ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER) {
     scriptDirectory = '';
   }
 
-  if (!(typeof window === 'object' || typeof importScripts === 'function')) throw new Error('not compiled for this environment (did you build to HTML and try to run it not on the web, or set ENVIRONMENT to something - like node - and run it someplace else - like on the web?)');
 
   // Differentiate the Web Worker from the Node Worker case, as reading must
   // be done differently.
@@ -2071,6 +2161,27 @@ var ASM_CONSTS = {
         }},default_tty_ops:{get_char:function(tty) {
           if (!tty.input.length) {
             var result = null;
+            if (ENVIRONMENT_IS_NODE) {
+              // we will read data by chunks of BUFSIZE
+              var BUFSIZE = 256;
+              var buf = Buffer.alloc ? Buffer.alloc(BUFSIZE) : new Buffer(BUFSIZE);
+              var bytesRead = 0;
+  
+              try {
+                bytesRead = nodeFS.readSync(process.stdin.fd, buf, 0, BUFSIZE, null);
+              } catch(e) {
+                // Cross-platform differences: on Windows, reading EOF throws an exception, but on other OSes,
+                // reading EOF returns 0. Uniformize behavior by treating the EOF exception to return 0.
+                if (e.toString().indexOf('EOF') != -1) bytesRead = 0;
+                else throw e;
+              }
+  
+              if (bytesRead > 0) {
+                result = buf.slice(0, bytesRead).toString('utf-8');
+              } else {
+                result = null;
+              }
+            } else
             if (typeof window != 'undefined' &&
               typeof window.prompt == 'function') {
               // Browser.
@@ -3574,6 +3685,16 @@ var ASM_CONSTS = {
           // for modern web browsers
           var randomBuffer = new Uint8Array(1);
           random_device = function() { crypto.getRandomValues(randomBuffer); return randomBuffer[0]; };
+        } else
+        if (ENVIRONMENT_IS_NODE) {
+          // for nodejs with or without crypto support included
+          try {
+            var crypto_module = require('crypto');
+            // nodejs has crypto support
+            random_device = function() { return crypto_module['randomBytes'](1)[0]; };
+          } catch (e) {
+            // nodejs doesn't have crypto support
+          }
         } else
         {}
         if (!random_device) {
@@ -5992,6 +6113,8 @@ var ASM_CONSTS = {
   
   var _emscripten_get_now_is_monotonic=
        (0
+        || ENVIRONMENT_IS_NODE
+        || (typeof dateNow !== 'undefined')
   
         // Modern environment where performance.now() is supported: (rely on minifier to return true unconditionally from this function)
         || 1
@@ -7011,8 +7134,8 @@ var ASM_CONSTS = {
       return cString === cString + 0 ? UTF8ToString(cString) : cString;
     }
   
-  var __specialEventTargets=[0, document, window];function __findEventTarget(target) {
-      var domElement = __specialEventTargets[target] || document.querySelector(__maybeCStringToJsString(target));
+  var __specialEventTargets=[0, typeof document !== 'undefined' ? document : 0, typeof window !== 'undefined' ? window : 0];function __findEventTarget(target) {
+      var domElement = __specialEventTargets[target] || (typeof document !== 'undefined' ? document.querySelector(__maybeCStringToJsString(target)) : undefined);
       return domElement;
     }
   
@@ -11827,7 +11950,14 @@ BindingError = Module['BindingError'] = extendError(Error, 'BindingError');;
 InternalError = Module['InternalError'] = extendError(Error, 'InternalError');;
 init_emval();;
 UnboundTypeError = Module['UnboundTypeError'] = extendError(Error, 'UnboundTypeError');;
-_emscripten_get_now = function() { return performance['now'](); };
+if (ENVIRONMENT_IS_NODE) {
+    _emscripten_get_now = function _emscripten_get_now_actual() {
+      var t = process['hrtime']();
+      return t[0] * 1e3 + t[1] / 1e6;
+    };
+  } else if (typeof dateNow !== 'undefined') {
+    _emscripten_get_now = dateNow;
+  } else _emscripten_get_now = function() { return performance['now'](); };
   ;
 Module["requestFullscreen"] = function Module_requestFullscreen(lockPointer, resizeCanvas, vrDevice) { Browser.requestFullscreen(lockPointer, resizeCanvas, vrDevice) };
   Module["requestFullScreen"] = function Module_requestFullScreen() { Browser.requestFullScreen() };
@@ -13099,28 +13229,6 @@ if (!Object.getOwnPropertyDescriptor(Module, "calledRun")) Object.defineProperty
 
 var calledRun;
 
-// Modularize mode returns a function, which can be called to
-// create instances. The instances provide a then() method,
-// must like a Promise, that receives a callback. The callback
-// is called when the module is ready to run, with the module
-// as a parameter. (Like a Promise, it also returns the module
-// so you can use the output of .then(..)).
-Module['then'] = function(func) {
-  // We may already be ready to run code at this time. if
-  // so, just queue a call to the callback.
-  if (calledRun) {
-    func(Module);
-  } else {
-    // we are not ready to call then() yet. we must call it
-    // at the same time we would call onRuntimeInitialized.
-    var old = Module['onRuntimeInitialized'];
-    Module['onRuntimeInitialized'] = function() {
-      if (old) old();
-      func(Module);
-    };
-  }
-  return Module;
-};
 
 /**
  * @constructor
@@ -13298,10 +13406,3 @@ run();
 
 
 
-
-
-  return Module
-}
-);
-})();
-export default Module;

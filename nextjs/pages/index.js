@@ -1,5 +1,5 @@
 import Head from 'next/head'
-import QtApp from '../components/QtApp'
+import AnalogClockCanvas from '../components/AnalogClockCanvas'
 
 export default function Home() {
   return (
@@ -9,7 +9,7 @@ export default function Home() {
         <meta name="description" content="Qt WASM App" />
         <link rel="icon" href="/favicon.ico" />
       </Head>
-      <QtApp></QtApp>
+      <AnalogClockCanvas></AnalogClockCanvas>
     </div>
   )
 }
